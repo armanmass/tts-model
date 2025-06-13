@@ -1,8 +1,9 @@
 import os
 import tempfile
 import uuid
-from datetime import datetime
-from typing import Optional, List
+from datetime import datetime, timezone
+from typing import Optional, List, AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -10,8 +11,6 @@ from pydantic import BaseModel, constr
 
 from tts_service.synth_edge_tts import synthesize
 from tts_service.pdf_processor import PDFProcessor, TextChunk
-
-app = FastAPI(title="Edge-TTS Service")
 
 # Constants
 TEMP_DIR = os.path.join(tempfile.gettempdir(), "tts_service")
@@ -28,32 +27,60 @@ class PDFSession(BaseModel):
     id: str
     chunks: List[TextChunk]
     current_index: int = 0
-    last_accessed: datetime = datetime.utcnow()
+    last_accessed: datetime = datetime.now(timezone.utc)
 
 # In-memory session store (would be Redis/DB in production)
 pdf_sessions: dict[str, PDFSession] = {}
 
-# Endpoints
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for FastAPI app"""
+    # Clean old files from temp directory
+    for file in os.listdir(TEMP_DIR):
+        try:
+            os.remove(os.path.join(TEMP_DIR, file))
+        except:
+            pass
+    yield
+
+app = FastAPI(title="Edge-TTS Service", lifespan=lifespan)
+
 @app.post("/pdf/upload")
 async def upload_pdf(file: UploadFile = File(...)) -> JSONResponse:
+    """Upload and process a PDF file"""
     if not file.filename.lower().endswith('.pdf'):
         raise HTTPException(status_code=400, detail="File must be a PDF")
     
     try:
         content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Empty PDF file")
+            
         processor = PDFProcessor()
-        chunks = [chunk async for chunk in processor.process_uploaded_pdf(content, file.filename)]
+        chunks = []
+        
+        try:
+            async for chunk in processor.process_uploaded_pdf(content, file.filename):
+                chunks.append(chunk)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Error processing PDF: {str(e)}")
         
         if not chunks:
             raise HTTPException(status_code=400, detail="No text content found in PDF")
         
         session_id = str(uuid.uuid4())
-        pdf_sessions[session_id] = PDFSession(id=session_id, chunks=chunks)
+        pdf_sessions[session_id] = PDFSession(
+            id=session_id, 
+            chunks=chunks,
+            last_accessed=datetime.now(timezone.utc)
+        )
         
         return JSONResponse({
             "session_id": session_id,
             "total_chunks": len(chunks)
         })
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -70,7 +97,7 @@ async def read_chunk(session_id: str, chunk_index: int):
     
     # Update session state
     session.current_index = chunk_index
-    session.last_accessed = datetime.utcnow()
+    session.last_accessed = datetime.now(timezone.utc)
     
     # Generate audio directly to memory
     try:
@@ -104,13 +131,3 @@ async def synthesize_text(request: TTSRequest):
         return Response(content=audio_data, media_type="audio/mpeg")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-# Cleanup task
-@app.on_event("startup")
-async def setup():
-    # Clean old files from temp directory
-    for file in os.listdir(TEMP_DIR):
-        try:
-            os.remove(os.path.join(TEMP_DIR, file))
-        except:
-            pass
