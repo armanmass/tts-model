@@ -1,54 +1,24 @@
 import os
-import tempfile
-import subprocess
-import shutil
+import io
 
 import asyncio
+import tempfile
+import subprocess
+
 import edge_tts
 
-from typing import List
+from typing import List, AsyncIterator
 
-async def synthesize(text: str, voice: str, output_path: str = "local.mp3", rate: str = "+0%", \
-                     volume: str = "+0%", format: str = ".mp3") -> str:
-    """
-    Synthesize text to speech using Edge TTS.
-    """
-    texts = [text] if len(text) <= 2000 else split_text(text)
-    temp_files = []
-
-    for i, chunk in enumerate(texts):
-        temp_fd, temp_mp3_path = tempfile.mkstemp(suffix=".mp3")
-        os.close(temp_fd)
-
-        comm = edge_tts.Communicate(chunk, voice=voice, rate=rate, volume=volume)
-
-        with open(temp_mp3_path, "wb") as f:
-            async for chunk in comm.stream():
-                if chunk["type"] == "audio":
-                    f.write(chunk["data"])
-        temp_files.append(temp_mp3_path)
+async def synthesize(text: str, voice: str = "en-US-AriaNeural", rate: str = "+0%", volume: str = "+0%") -> bytes:
+    """Synthesize text to speech using Edge TTS and return audio bytes"""
+    buffer = io.BytesIO()
+    communicate = edge_tts.Communicate(text, voice=voice, rate=rate, volume=volume)
     
-    if len(temp_files) == 1:
-        shutil.move(temp_files[0], output_path)
-    else:
-        list_fd, list_path = tempfile.mkstemp(suffix=".txt")
-        with os.fdopen(list_fd, 'w') as lf:
-            for mp3_path in temp_files:
-                lf.write(f"file '{mp3_path}'\n")
-        
-        try:
-            subprocess.run([
-                "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_path,
-                "-c", "copy", output_path
-            ], check=True)
-        except Exception as e:
-            raise RuntimeError(f"Failed to concatenate audio files: {e}")
-        finally:
-            for fpath in temp_files:
-                os.remove(fpath)
-            os.remove(list_path)
-    return output_path
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            buffer.write(chunk["data"])
     
+    return buffer.getvalue()
 
 def split_text(text: str, max_chars: int = 2000) -> List[str]:
     """
@@ -84,9 +54,4 @@ if __name__ == "__main__":
     parser.add_argument("--rate", type=str, default="+0%", help="Rate adjustment (e.g., '0%', '10%')")
     parser.add_argument("--volume", type=str, default="+0%", help="Volume adjustment (e.g., '0%', '10%')")
     args = parser.parse_args()
-    asyncio.run(synthesize(args.text, args.voice, args.output, rate=args.rate, volume=args.volume))
-
-
-    
-
-
+    asyncio.run(synthesize(args.text, args.voice, args.rate, args.volume))
