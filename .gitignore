@@ -1,0 +1,27 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Development
+temp/
+.env
+*.log
+
+# Static files - exclude generated files but keep source
+tts_service/static/assets/generated/
+tts_service/static/css/*.min.css
+tts_service/static/js/*.min.js
+tts_service/static/*.map
+
+# Keep source files
+!tts_service/static/css/*.css
+!tts_service/static/js/*.js
+!tts_service/static/assets/favicon.ico
+
+# Tests
+tts_service/tests/
+.coverage
+htmlcov/
