@@ -25,3 +25,4 @@ tts_service/static/*.map
 tts_service/tests/
 .coverage
 htmlcov/
+temp/feature_plans/
