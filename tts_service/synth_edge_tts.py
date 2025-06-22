@@ -55,3 +55,11 @@ if __name__ == "__main__":
     parser.add_argument("--volume", type=str, default="+0%", help="Volume adjustment (e.g., '0%', '10%')")
     args = parser.parse_args()
     asyncio.run(synthesize(args.text, args.voice, args.rate, args.volume))
+
+    async def save_audio():
+        audio_bytes = await synthesize(args.text, args.voice, args.rate, args.volume)
+        with open(args.output, "wb") as f:
+            f.write(audio_bytes)
+        print(f"Saved audio to {args.output}")
+
+    asyncio.run(save_audio())

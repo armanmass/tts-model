@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PDF to Speech</title>
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+</head>
+<body>
+  <h1>Upload PDF and Listen</h1>
+  <input type="file" id="pdfFile" />
+  <button onclick="uploadPDF()">Upload</button>
+  <p id="status"></p>
+  <audio id="audioPlayer" controls></audio>
+  
+  <!-- Add controls for navigation -->
+  <div id="controls" style="display: none; margin-top: 10px;">
+    <button onclick="playPreviousChunk()">Previous</button>
+    <button onclick="playNextChunk()">Next</button>
+    <span id="chunkInfo"></span>
+  </div>
+
+  <script>
+    let currentSessionId = null;
+    let currentChunkIndex = 0;
+    let totalChunks = 0;
+
+    async function uploadPDF() {
+      const fileInput = document.getElementById("pdfFile");
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      document.getElementById("status").textContent = "Uploading...";
+
+      try {
+        const uploadRes = await fetch("/pdf/upload", {
+          method: "POST",
+          body: formData
+        });
+
+        if (!uploadRes.ok) {
+          throw new Error(`Upload failed: ${uploadRes.status}`);
+        }
+
+        const data = await uploadRes.json();
+        currentSessionId = data.session_id;
+        totalChunks = data.total_chunks;
+        currentChunkIndex = 0;
+
+        document.getElementById("controls").style.display = "block";
+        updateChunkInfo();
+
+        // Play first chunk
+        await playChunk(0);
+        
+        // Set up auto-play for next chunks
+        setupAutoPlay();
+
+      } catch (error) {
+        document.getElementById("status").textContent = `Error: ${error.message}`;
+      }
+    }
+
+    async function playChunk(chunkIndex) {
+      if (chunkIndex < 0 || chunkIndex >= totalChunks) {
+        document.getElementById("status").textContent = "No more chunks to play.";
+        return;
+      }
+
+      document.getElementById("status").textContent = `Loading chunk ${chunkIndex + 1}/${totalChunks}...`;
+
+      try {
+        const audioRes = await fetch(`/pdf/${currentSessionId}/read/${chunkIndex}`);
+        if (!audioRes.ok) {
+          const errorText = await audioRes.text();
+          throw new Error(`${audioRes.status} - ${errorText}`);
+        }
+        
+        const audioBlob = await audioRes.blob();
+        const audioUrl = URL.createObjectURL(audioBlob);
+
+        const audioPlayer = document.getElementById("audioPlayer");
+        audioPlayer.src = audioUrl;
+        audioPlayer.play();
+
+        currentChunkIndex = chunkIndex;
+        updateChunkInfo();
+        document.getElementById("status").textContent = `Playing chunk ${chunkIndex + 1}/${totalChunks}`;
+
+      } catch (error) {
+        document.getElementById("status").textContent = `Error: ${error.message}`;
+      }
+    }
+
+    function setupAutoPlay() {
+      const audioPlayer = document.getElementById("audioPlayer");
+      
+      // When current chunk ends, play next chunk
+      audioPlayer.addEventListener('ended', async () => {
+        if (currentChunkIndex < totalChunks - 1) {
+          await playChunk(currentChunkIndex + 1);
+        } else {
+          document.getElementById("status").textContent = "Finished reading PDF!";
+        }
+      });
+    }
+
+    async function playNextChunk() {
+      if (currentChunkIndex < totalChunks - 1) {
+        await playChunk(currentChunkIndex + 1);
+      }
+    }
+
+    async function playPreviousChunk() {
+      if (currentChunkIndex > 0) {
+        await playChunk(currentChunkIndex - 1);
+      }
+    }
+
+    function updateChunkInfo() {
+      document.getElementById("chunkInfo").textContent = 
+        `Chunk ${currentChunkIndex + 1} of ${totalChunks}`;
+    }
+  </script>
+</body>
+</html>

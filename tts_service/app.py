@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
+
 from pydantic import BaseModel, constr
 
 from tts_service.synth_edge_tts import synthesize
@@ -15,6 +17,9 @@ from tts_service.pdf_processor import PDFProcessor, TextChunk
 # Constants
 TEMP_DIR = os.path.join(tempfile.gettempdir(), "tts_service")
 os.makedirs(TEMP_DIR, exist_ok=True)
+from pathlib import Path
+CURRENT_DIR = Path(__file__).parent
+STATIC_DIR = CURRENT_DIR / "static"
 
 # Models
 class TTSRequest(BaseModel):
@@ -44,6 +49,11 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="Edge-TTS Service", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+@app.get("/")
+async def serve_frontend():
+    return FileResponse(str(STATIC_DIR / "index.html"))
 
 @app.post("/pdf/upload")
 async def upload_pdf(file: UploadFile = File(...)) -> JSONResponse:
@@ -60,7 +70,7 @@ async def upload_pdf(file: UploadFile = File(...)) -> JSONResponse:
         chunks = []
         
         try:
-            async for chunk in processor.process_uploaded_pdf(content, file.filename):
+            for chunk in processor.process_uploaded_pdf(content, file.filename):
                 chunks.append(chunk)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error processing PDF: {str(e)}")
@@ -112,11 +122,17 @@ async def get_status(session_id: str) -> JSONResponse:
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
+    # If session exists but has no chunks, it's an invalid session
+    if not session.chunks:
+        raise HTTPException(status_code=404, detail="Session has no content")
+    
     current_chunk = session.chunks[session.current_index]
     return JSONResponse({
         "current_index": session.current_index,
         "total_chunks": len(session.chunks),
-        "current_page": current_chunk.page_number
+        "current_page": current_chunk.page_number,
+        "session_id": session_id,
+        "last_accessed": session.last_accessed.isoformat()
     })
 
 @app.post("/tts")

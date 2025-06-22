@@ -149,7 +149,7 @@ class PDFProcessor:
         self.temp_dir = temp_dir or os.path.join(tempfile.gettempdir(), "pdf_processor")
         os.makedirs(self.temp_dir, exist_ok=True)
     
-    async def process_uploaded_pdf(self, pdf_content: bytes, filename: str) -> Iterator[TextChunk]:
+    def process_uploaded_pdf(self, pdf_content: bytes, filename: str) -> Iterator[TextChunk]:
         """
         Process uploaded PDF content
         """
